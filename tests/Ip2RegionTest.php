@@ -50,6 +50,15 @@ class Ip2RegionTest extends TestCase
         $this->assertEquals($expected, $r);
     }
 
+    public function testSearchDefault()
+    {
+        foreach ($this->ips as $ip => $expected) {
+            $r = Ip2Region::search($ip);
+            printf("ip: %s, region: %s\n", $ip, $r);
+            $this->assertEquals($expected, $r);
+        }
+    }
+
     public function testSearch()
     {
         foreach (['file', 'vectorIndex', 'content'] as $cachePolicy) {

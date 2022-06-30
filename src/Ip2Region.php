@@ -20,6 +20,20 @@ class Ip2Region
     public const XDB_PATH = __DIR__ . '/../assets/ip2region.xdb';
 
     /**
+     * 完全基于文件的查询
+     *
+     * @param $ip
+     * @return string|null
+     * @throws \Exception
+     */
+    public static function search($ip)
+    {
+        return XdbSearcher::newWithFileOnly(self::XDB_PATH)->search($ip);
+    }
+
+    /**
+     * 完全基于文件的查询
+     *
      * 备注：并发使用，每个线程或者协程需要创建一个独立的 searcher 对象。
      * @return XdbSearcher
      */
