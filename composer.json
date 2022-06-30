@@ -17,7 +17,7 @@
     "chinayin/ip2region-core": "^2.0"
   },
   "require-dev": {
-    "phpunit/phpunit": "^6.0",
+    "phpunit/phpunit": "^6.0|^9.5",
     "friendsofphp/php-cs-fixer": "^3.0",
     "phpstan/phpstan": "^1.0"
   },
