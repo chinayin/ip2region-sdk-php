@@ -1,397 +1,65 @@
 <?php
-/**
- * ip2region php seacher client class
+
+/*
+ * This file is part of the Ip2Region package.
  *
- * @author  chenxin<chenxin619315@gmail.com>
- * @date    2015-10-29
+ * Copyright 2022 The Ip2Region Authors. All rights reserved.
+ * Use of this source code is governed by a Apache2.0-style
+ * license that can be found in the LICENSE file.
+ *
+ * @link   https://github.com/chinayin/ip2region-sdk-php
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
  */
 
-namespace lionsoul2014;
-
-defined('INDEX_BLOCK_LENGTH') or define('INDEX_BLOCK_LENGTH', 12);
-defined('TOTAL_HEADER_LENGTH') or define('TOTAL_HEADER_LENGTH', 8192);
+namespace ip2region;
 
 class Ip2Region
 {
-    /**
-     * db file handler
-     */
-    private $dbFileHandler = null;
+    public const XDB_PATH = __DIR__ . '/../assets/ip2region.xdb';
 
     /**
-     * header block info
+     * 备注：并发使用，每个线程或者协程需要创建一个独立的 searcher 对象。
+     * @return XdbSearcher
      */
-    private $HeaderSip = null;
-    private $HeaderPtr = null;
-    private $headerLen = 0;
-
-    /**
-     * super block index info
-     */
-    private $firstIndexPtr = 0;
-    private $lastIndexPtr = 0;
-    private $totalBlocks = 0;
-
-    /**
-     * for memory mode only
-     *  the original db binary string
-     */
-    private $dbBinStr = null;
-    private $dbFile = null;
-
-    /**
-     * construct method
-     *
-     * @param   $ip2regionFile
-     */
-    public function __construct($ip2regionFile = null)
+    public static function newWithFileOnly()
     {
-        null === $ip2regionFile &&
-        $ip2regionFile = __DIR__ . '/../assets/ip2region.db';
-        $this->dbFile = $ip2regionFile;
+        return XdbSearcher::newWithFileOnly(self::XDB_PATH);
     }
 
     /**
-     * all the db binary string will be loaded into memory
-     * then search the memory only and this will a lot faster than disk base search
+     * 缓存 VectorIndex 索引
      *
-     * @Note:
-     * invoke it once before put it to public invoke could make it thread safe
-     *
-     * @param $ip
-     *
-     * @return array|null
-     * @throws \Exception
+     * 备注：并发使用，每个线程或者协程需要创建一个独立的 searcher 对象，但是都共享统一的只读 vectorIndex。
+     * @return XdbSearcher
+     * @throws \RuntimeException
      */
-    public function memorySearch($ip)
+    public static function newWithVectorIndex()
     {
-        //check and load the binary string for the first time
-        if ($this->dbBinStr == null) {
-            $this->dbBinStr = file_get_contents($this->dbFile);
-            if ($this->dbBinStr == false) {
-                throw new \Exception("Fail to open the db file {$this->dbFile}");
-            }
-
-            $this->firstIndexPtr = self::getLong($this->dbBinStr, 0);
-            $this->lastIndexPtr = self::getLong($this->dbBinStr, 4);
-            $this->totalBlocks = ($this->lastIndexPtr - $this->firstIndexPtr) / INDEX_BLOCK_LENGTH + 1;
+        // 从 path 加载 VectorIndex 缓存，把下述的 vIndex 变量缓存到内存里面。
+        $vIndex = XdbSearcher::loadVectorIndexFromFile(self::XDB_PATH);
+        if ($vIndex === null) {
+            throw new \RuntimeException(sprintf("failed to load vector index from '%s'", self::XDB_PATH));
         }
-
-        if (is_string($ip)) {
-            $ip = self::safeIp2long($ip);
-        }
-
-        //binary search to define the data
-        $l = 0;
-        $h = $this->totalBlocks;
-        $dataPtr = 0;
-        while ($l <= $h) {
-            $m = (($l + $h) >> 1);
-            $p = $this->firstIndexPtr + $m * INDEX_BLOCK_LENGTH;
-            $sip = self::getLong($this->dbBinStr, $p);
-            if ($ip < $sip) {
-                $h = $m - 1;
-            } else {
-                $eip = self::getLong($this->dbBinStr, $p + 4);
-                if ($ip > $eip) {
-                    $l = $m + 1;
-                } else {
-                    $dataPtr = self::getLong($this->dbBinStr, $p + 8);
-                    break;
-                }
-            }
-        }
-
-        //not matched just stop it here
-        if ($dataPtr == 0) {
-            return null;
-        }
-
-        //get the data
-        $dataLen = (($dataPtr >> 24) & 0xFF);
-        $dataPtr = ($dataPtr & 0x00FFFFFF);
-
-        return [
-            'city_id' => self::getLong($this->dbBinStr, $dataPtr),
-            'region' => substr($this->dbBinStr, $dataPtr + 4, $dataLen - 4)
-        ];
+        // 使用全局的 vIndex 创建带 VectorIndex 缓存的查询对象。
+        return XdbSearcher::newWithVectorIndex(self::XDB_PATH, $vIndex);
     }
 
     /**
-     * get the data block through the specified ip address or long ip numeric with binary search algorithm
+     * 缓存整个 xdb 数据
      *
-     * @param $ip
-     *
-     * @return array|null
-     * @throws \Exception
+     * 备注：并发使用，用整个 xdb 缓存创建的 searcher 对象可以安全用于并发。
+     * @return XdbSearcher
+     * @throws \RuntimeException
      */
-    public function binarySearch($ip)
+    public static function newWithBuffer()
     {
-        //check and conver the ip address
-        if (is_string($ip)) {
-            $ip = self::safeIp2long($ip);
+        // 从 path 加载整个 xdb 到内存。
+        $cBuff = XdbSearcher::loadContentFromFile(self::XDB_PATH);
+        if ($cBuff === null) {
+            throw new \RuntimeException(sprintf("failed to load content buffer from '%s'", self::XDB_PATH));
         }
-        if ($this->totalBlocks == 0) {
-            //check and open the original db file
-            if ($this->dbFileHandler == null) {
-                $this->dbFileHandler = fopen($this->dbFile, 'r');
-                if ($this->dbFileHandler == false) {
-                    throw new \Exception("Fail to open the db file {$this->dbFile}");
-                }
-            }
-
-            fseek($this->dbFileHandler, 0);
-            $superBlock = fread($this->dbFileHandler, 8);
-
-            $this->firstIndexPtr = self::getLong($superBlock, 0);
-            $this->lastIndexPtr = self::getLong($superBlock, 4);
-            $this->totalBlocks = ($this->lastIndexPtr - $this->firstIndexPtr) / INDEX_BLOCK_LENGTH + 1;
-        }
-
-        //binary search to define the data
-        $l = 0;
-        $h = $this->totalBlocks;
-        $dataPtr = 0;
-        while ($l <= $h) {
-            $m = (($l + $h) >> 1);
-            $p = $m * INDEX_BLOCK_LENGTH;
-
-            fseek($this->dbFileHandler, $this->firstIndexPtr + $p);
-            $buffer = fread($this->dbFileHandler, INDEX_BLOCK_LENGTH);
-            $sip = self::getLong($buffer, 0);
-            if ($ip < $sip) {
-                $h = $m - 1;
-            } else {
-                $eip = self::getLong($buffer, 4);
-                if ($ip > $eip) {
-                    $l = $m + 1;
-                } else {
-                    $dataPtr = self::getLong($buffer, 8);
-                    break;
-                }
-            }
-        }
-
-        //not matched just stop it here
-        if ($dataPtr == 0) {
-            return null;
-        }
-
-        //get the data
-        $dataLen = (($dataPtr >> 24) & 0xFF);
-        $dataPtr = ($dataPtr & 0x00FFFFFF);
-
-        fseek($this->dbFileHandler, $dataPtr);
-        $data = fread($this->dbFileHandler, $dataLen);
-
-        return [
-            'city_id' => self::getLong($data, 0),
-            'region' => substr($data, 4)
-        ];
-    }
-
-    /**
-     * get the data block associated with the specified ip with b-tree search algorithm
-     *
-     * @Note: not thread safe
-     *
-     * @param $ip
-     *
-     * @return array|null
-     * @throws \Exception
-     */
-    public function btreeSearch($ip)
-    {
-        if (is_string($ip)) {
-            $ip = self::safeIp2long($ip);
-        }
-
-        //check and load the header
-        if ($this->HeaderSip == null) {
-            //check and open the original db file
-            if ($this->dbFileHandler == null) {
-                $this->dbFileHandler = fopen($this->dbFile, 'r');
-                if ($this->dbFileHandler == false) {
-                    throw new \Exception("Fail to open the db file {$this->dbFile}");
-                }
-            }
-
-            fseek($this->dbFileHandler, 8);
-            $buffer = fread($this->dbFileHandler, TOTAL_HEADER_LENGTH);
-
-            //fill the header
-            $idx = 0;
-            $this->HeaderSip = [];
-            $this->HeaderPtr = [];
-            for ($i = 0; $i < TOTAL_HEADER_LENGTH; $i += 8) {
-                $startIp = self::getLong($buffer, $i);
-                $dataPtr = self::getLong($buffer, $i + 4);
-                if ($dataPtr == 0) {
-                    break;
-                }
-
-                $this->HeaderSip[] = $startIp;
-                $this->HeaderPtr[] = $dataPtr;
-                $idx++;
-            }
-
-            $this->headerLen = $idx;
-        }
-
-        //1. define the index block with the binary search
-        $l = 0;
-        $h = $this->headerLen;
-        $sptr = 0;
-        $eptr = 0;
-        while ($l <= $h) {
-            $m = (($l + $h) >> 1);
-
-            //perfetc matched, just return it
-            if ($ip == $this->HeaderSip[$m]) {
-                if ($m > 0) {
-                    $sptr = $this->HeaderPtr[$m - 1];
-                    $eptr = $this->HeaderPtr[$m];
-                } else {
-                    $sptr = $this->HeaderPtr[$m];
-                    $eptr = $this->HeaderPtr[$m + 1];
-                }
-
-                break;
-            }
-
-            //less then the middle value
-            if ($ip < $this->HeaderSip[$m]) {
-                if ($m == 0) {
-                    $sptr = $this->HeaderPtr[$m];
-                    $eptr = $this->HeaderPtr[$m + 1];
-                    break;
-                } else {
-                    if ($ip > $this->HeaderSip[$m - 1]) {
-                        $sptr = $this->HeaderPtr[$m - 1];
-                        $eptr = $this->HeaderPtr[$m];
-                        break;
-                    }
-                }
-                $h = $m - 1;
-            } else {
-                if ($m == $this->headerLen - 1) {
-                    $sptr = $this->HeaderPtr[$m - 1];
-                    $eptr = $this->HeaderPtr[$m];
-                    break;
-                } else {
-                    if ($ip <= $this->HeaderSip[$m + 1]) {
-                        $sptr = $this->HeaderPtr[$m];
-                        $eptr = $this->HeaderPtr[$m + 1];
-                        break;
-                    }
-                }
-                $l = $m + 1;
-            }
-        }
-
-        //match nothing just stop it
-        if ($sptr == 0) {
-            return null;
-        }
-
-        //2. search the index blocks to define the data
-        $blockLen = $eptr - $sptr;
-        fseek($this->dbFileHandler, $sptr);
-        $index = fread($this->dbFileHandler, $blockLen + INDEX_BLOCK_LENGTH);
-
-        $dataPtr = 0;
-        $l = 0;
-        $h = $blockLen / INDEX_BLOCK_LENGTH;
-        while ($l <= $h) {
-            $m = (($l + $h) >> 1);
-            $p = (int)($m * INDEX_BLOCK_LENGTH);
-            $sip = self::getLong($index, $p);
-            if ($ip < $sip) {
-                $h = $m - 1;
-            } else {
-                $eip = self::getLong($index, $p + 4);
-                if ($ip > $eip) {
-                    $l = $m + 1;
-                } else {
-                    $dataPtr = self::getLong($index, $p + 8);
-                    break;
-                }
-            }
-        }
-
-        //not matched
-        if ($dataPtr == 0) {
-            return null;
-        }
-
-        //3. get the data
-        $dataLen = (($dataPtr >> 24) & 0xFF);
-        $dataPtr = ($dataPtr & 0x00FFFFFF);
-
-        fseek($this->dbFileHandler, $dataPtr);
-        $data = fread($this->dbFileHandler, $dataLen);
-
-        return [
-            'city_id' => self::getLong($data, 0),
-            'region' => substr($data, 4)
-        ];
-    }
-
-    /**
-     * safe self::safeIp2long function
-     *
-     * @param $ip
-     *
-     * @return int|string
-     */
-    public static function safeIp2long($ip)
-    {
-        $ip = ip2long($ip);
-
-        // convert signed int to unsigned int if on 32 bit operating system
-        if ($ip < 0 && PHP_INT_SIZE == 4) {
-            $ip = sprintf("%u", $ip);
-        }
-
-        return $ip;
-    }
-
-    /**
-     * read a long from a byte buffer
-     *
-     * @param $b
-     * @param $offset
-     *
-     * @return int|string
-     */
-    public static function getLong($b, $offset)
-    {
-        $val = (
-            (ord($b[$offset++])) |
-            (ord($b[$offset++]) << 8) |
-            (ord($b[$offset++]) << 16) |
-            (ord($b[$offset]) << 24)
-        );
-
-        // convert signed int to unsigned int if on 32 bit operating system
-        if ($val < 0 && PHP_INT_SIZE == 4) {
-            $val = sprintf("%u", $val);
-        }
-
-        return $val;
-    }
-
-    /**
-     * destruct method, resource destroy
-     */
-    public function __destruct()
-    {
-        if ($this->dbFileHandler != null) {
-            fclose($this->dbFileHandler);
-        }
-
-        $this->dbBinStr = null;
-        $this->HeaderSip = null;
-        $this->HeaderPtr = null;
+        return XdbSearcher::newWithBuffer($cBuff);
     }
 }
