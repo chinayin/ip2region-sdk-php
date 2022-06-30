@@ -1,34 +1,38 @@
 <?php
 
-namespace lionsoul2014\Tests;
+/*
+ * This file is part of the Ip2Region package.
+ *
+ * Copyright 2022 The Ip2Region Authors. All rights reserved.
+ * Use of this source code is governed by a Apache2.0-style
+ * license that can be found in the LICENSE file.
+ *
+ * @link   https://github.com/chinayin/ip2region-sdk-php
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
 
-use lionsoul2014\Ip2Region;
+namespace ip2region\Tests;
+
+use ip2region\Ip2Region;
 
 class TestCase extends \PHPUnit\Framework\TestCase
 {
-
-    public function testFeature()
+    public static function now()
     {
-        $funs = [
-            'binarySearch', 'memorySearch', 'btreeSearch'
-        ];
-        $ip = '220.181.38.150';
-        $expected = [
-            'city_id' => 215,
-            'region' => '中国|0|北京|北京市|电信',
-        ];
-        $ip2region = new Ip2Region;
-        foreach ($funs as $fn) {
-            $start = $this->getTime();
-            $data = $ip2region->$fn($ip);
-            $end = $this->getTime() - $start;
-            printf("%s (%s) ==> %s|%s in %.5f millseconds\n", $ip, $fn, $data['city_id'], $data['region'], $end);
-            $this->assertEquals($expected, $data);
-        }
+        return microtime(true) * 1000;
     }
 
-    function getTime()
+    public function test()
     {
-        return (microtime(true) * 1000);
+        $ip = '1.2.3.4';
+        try {
+            $region = Ip2Region::newWithFileOnly()->search($ip);
+            var_dump($region);
+        } catch (\Exception $e) {
+            var_dump($e->getMessage());
+        }
+        $this->assertTrue(true);
     }
 }

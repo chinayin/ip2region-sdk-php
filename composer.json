@@ -1,6 +1,6 @@
 {
   "name": "chinayin/ip2region",
-  "description": "Ip2region is a offline IP location library with accuracy rate of 99.9% and 0.0x millseconds searching performance. DB file is less then 5Mb with all ip address stored",
+  "description": "[定期更新数据版] Ip2region (2.0 - xdb) is a offline IP address manager framework and locator with ten microsecond searching performance. xdb engine implementation for many programming languages\n\n",
   "authors": [
     {
       "name": "lionsoul2014",
@@ -13,19 +13,32 @@
   ],
   "license": "Apache-2.0",
   "require": {
-    "PHP": ">=5.6"
+    "PHP": ">=7.1",
+    "chinayin/ip2region-core": "^2.0"
   },
   "require-dev": {
-    "phpunit/phpunit": "^6.0"
+    "phpunit/phpunit": "^6.0",
+    "friendsofphp/php-cs-fixer": "^3.0",
+    "phpstan/phpstan": "^1.0"
   },
   "autoload": {
     "psr-4": {
-      "lionsoul2014\\": "src/"
+      "ip2region\\": "src"
     }
   },
   "autoload-dev": {
     "psr-4": {
-      "lionsoul2014\\Tests\\": "tests/"
+      "ip2region\\Tests\\": "tests"
     }
+  },
+  "scripts": {
+    "test": "vendor/bin/phpunit",
+    "test-ci": "vendor/bin/phpunit --coverage-text",
+    "lint": "vendor/bin/php-cs-fixer fix -v",
+    "analyse": "vendor/bin/phpstan analyse",
+    "travis": [
+      "composer lint",
+      "composer analyse"
+    ]
   }
 }

@@ -5,3 +5,5 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+.php-cs-fixer.cache
+phpunit.xml
